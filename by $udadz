@@ -1,7 +1,7 @@
 --[[
-    BLADE BALL SYNTHWAVE SHADER SUITE v3.3
+    BLADE BALL SYNTHWAVE SHADER SUITE v3.4
     Client-side only. Executor compatible.
-    Features: Fixed Terrain Decoration executor bug, Draggable UI, Auto-Save/Load configs.
+    Features: Fixed HttpGet bug, Replaced JSON with custom parser, Auto-Save/Load configs.
     Auto-enables on load. Use _G.BladeBallShaders.disable() to revert.
 --]]
 
@@ -10,7 +10,6 @@ local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -171,6 +170,43 @@ end
 
 local function trackConnection(conn)
     table.insert(connections, conn)
+end
+
+-- Helper: Replace JSON with Custom Serialization
+local function serializeConfig(tbl)
+    local str = "{\n"
+    for k, v in pairs(tbl) do
+        if type(v) == "number" then
+            str = str .. string.format('    "%s": %s,\n', k, v)
+        elseif type(v) == "boolean" then
+            str = str .. string.format('    "%s": %s,\n', k, tostring(v))
+        elseif type(v) == "string" then
+            str = str .. string.format('    "%s": "%s",\n', k, v)
+        end
+    end
+    str = str .. "}"
+    return str
+end
+
+local function deserializeConfig(str)
+    local success, parsed = pcall(function()
+        local result = {}
+        for k, v in string.gmatch(str, '"(%w+)":%s*([^,\n]+)') do
+            local num = tonumber(v)
+            if num then
+                result[k] = num
+            elseif v == "true" then
+                result[k] = true
+            elseif v == "false" then
+                result[k] = false
+            else
+                result[k] = v:gsub("^%s*\"*", ""):gsub("\"*%s*$", "")
+            end
+        end
+        return result
+    end)
+    if success then return parsed end
+    return nil
 end
 
 -- ============================================================
@@ -629,7 +665,8 @@ local function makeDraggable(frame, dragBar)
     end)
 
     UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then            dragging = false
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
         end
     end)
 end
@@ -1078,30 +1115,21 @@ local function createUI()
     local importCorner = Instance.new("UICorner"); importCorner.CornerRadius = UDim.new(0, 4); importCorner.Parent = importBtn
 
     exportBtn.MouseButton1Click:Connect(function()
-        local str = "{\n"
-        for k, v in pairs(CONFIG) do
-            if type(v) == "number" then str = str .. string.format("    %s = %s,\n", k, v)
-            elseif type(v) == "boolean" then str = str .. string.format("    %s = %s,\n", k, tostring(v))
-            end
-        end
-        str = str .. "}"
-        configBox.Text = str
+        configBox.Text = serializeConfig(CONFIG)
     end)
 
     importBtn.MouseButton1Click:Connect(function()
-        local success = pcall(function()
-            local loaded = HttpService:JSONDecode(configBox.Text)
-            if loaded then
-                for k, v in pairs(loaded) do
-                    if CONFIG[k] ~= nil and type(CONFIG[k]) == type(v) then
-                        CONFIG[k] = v
-                    end
+        local loaded = deserializeConfig(configBox.Text)
+        if loaded then
+            for k, v in pairs(loaded) do
+                if CONFIG[k] ~= nil and type(CONFIG[k]) == type(v) then
+                    CONFIG[k] = v
                 end
-                _G.BladeBallShaders.disable()
-                task.wait(0.1)
-                _G.BladeBallShaders.enable()
             end
-        end)
+            _G.BladeBallShaders.disable()
+            task.wait(0.1)
+            _G.BladeBallShaders.enable()
+        end
     end)
 
     -- ACTIONS
