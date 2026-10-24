@@ -1,0 +1,1367 @@
+--[[
+    BLADE BALL SYNTHWAVE SHADER SUITE v3.2
+    Client-side only. Executor compatible.
+    Features: Fixed UIPadding bug, Custom Draggable, Full UI Toggle with RightShift.
+    Auto-enables on load. Use _G.BladeBallShaders.disable() to revert.
+--]]
+
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- ============================================================
+-- CONFIG
+-- ============================================================
+local CONFIG = {
+    -- Atmosphere & Lighting
+    ambient = Color3.fromRGB(35, 8, 45),
+    outdoorAmbient = Color3.fromRGB(55, 12, 75),
+    colorShiftTop = Color3.fromRGB(255, 0, 200),
+    colorShiftBottom = Color3.fromRGB(0, 255, 255),
+    brightness = 2.8,
+    exposureCompensation = 0.6,
+    globalShadows = true,
+    technology = Enum.Technology.Future,
+    shadowSoftness = 0.2,
+    environmentDiffuseScale = 0.5,
+    environmentSpecularScale = 0.5,
+
+    -- Atmosphere Instance
+    atmosphereDensity = 0.45,
+    atmosphereOffset = 0.15,
+    atmosphereColor = Color3.fromRGB(255, 60, 210),
+    atmosphereDecay = Color3.fromRGB(120, 0, 90),
+    atmosphereGlare = 2.5,
+    atmosphereHaze = 3.5,
+
+    -- Sky
+    skyStarCount = 3500,
+    skyMoonAngularSize = 8,
+    skySunAngularSize = 12,
+
+    -- Bloom
+    bloomIntensity = 1.4,
+    bloomSize = 28,
+    bloomThreshold = 0.75,
+
+    -- Color Correction
+    ccTint = Color3.fromRGB(255, 190, 255),
+    ccSaturation = 0.45,
+    ccContrast = 0.35,
+    ccBrightness = 0.12,
+
+    -- Sun Rays
+    sunRaysIntensity = 0.12,
+    sunRaysSpread = 0.55,
+
+    -- Depth of Field
+    dofFarIntensity = 0.18,
+    dofFocusDistance = 22,
+    dofInFocusRadius = 12,
+    dofNearIntensity = 0.12,
+
+    -- Blur (parry window)
+    blurSize = 5,
+    parryBlurEnabled = true,
+    parryBlurDuration = 0.25,
+    parryBlurSize = 8,
+
+    -- Vignette
+    vignetteTransparency = 0.38,
+    vignettePulseSpeed = 1.5,
+    vignettePulseAmount = 0.06,
+
+    -- Chromatic Aberration Overlay
+    chromaTransparency = 0.82,
+    chromaPulseSpeed = 2.2,
+    chromaPulseAmount = 0.04,
+
+    -- Particles
+    particleTexture = "rbxassetid://243660364",
+    particleColor = Color3.fromRGB(255, 0, 200),
+    particleSize = 1.8,
+    particleLifetime = 0.6,
+    particleRate = 25,
+    orbParticleColor = Color3.fromRGB(0, 255, 255),
+    orbParticleSize = 2.5,
+    orbParticleRate = 40,
+
+    -- Trails (Optimized)
+    trailLifetime = 0.35,
+    trailColor = Color3.fromRGB(0, 255, 255),
+    trailWidth = 0.6,
+    trailTransparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(0.5, 0.4),
+        NumberSequenceKeypoint.new(1, 1),
+    }),
+
+    -- Material Tuning
+    neonBoostMultiplier = 1.6,
+    terrainWaterColor = Color3.fromRGB(255, 0, 150),
+    terrainWaterWaveSize = 0.6,
+    terrainWaterWaveSpeed = 2.5,
+    terrainWaterTransparency = 0.18,
+
+    -- Animation
+    atmospherePulseSpeed = 0.5,
+    atmospherePulseAmount = 0.12,
+    bloomPulseSpeed = 0.7,
+    bloomPulseAmount = 0.25,
+    hueRotationSpeed = 0.06,
+
+    -- Performance
+    descendantScanInterval = 1,
+    maxParticlesPerCharacter = 1,
+}
+
+-- ============================================================
+-- STATE
+-- ============================================================
+local originals = {}
+local createdInstances = {}
+local connections = {}
+local isEnabled = false
+local scanAccumulator = 0
+local parryBlurActive = false
+local currentTheme = 1
+
+-- ============================================================
+-- THEMES (10 PREBUILT)
+-- ============================================================
+local THEMES = {
+    {
+        name = "Synthwave",
+        ambient = Color3.fromRGB(35, 8, 45),
+        outdoorAmbient = Color3.fromRGB(55, 12, 75),
+        colorShiftTop = Color3.fromRGB(255, 0, 200),
+        colorShiftBottom = Color3.fromRGB(0, 255, 255),
+        atmosphereColor = Color3.fromRGB(255, 60, 210),
+        atmosphereDecay = Color3.fromRGB(120, 0, 90),
+        bloomIntensity = 1.4,
+        ccTint = Color3.fromRGB(255, 190, 255),
+        ccSaturation = 0.45,
+        neonBoostMultiplier = 1.6,
+        particleColor = Color3.fromRGB(255, 0, 200),
+        orbParticleColor = Color3.fromRGB(0, 255, 255),
+        trailColor = Color3.fromRGB(0, 255, 255),
+        terrainWaterColor = Color3.fromRGB(255, 0, 150),
+    },
+    {
+        name = "Cyberpunk",
+        ambient = Color3.fromRGB(10, 20, 40),
+        outdoorAmbient = Color3.fromRGB(20, 40, 80),
+        colorShiftTop = Color3.fromRGB(0, 255, 255),
+        colorShiftBottom = Color3.fromRGB(255, 255, 0),
+        atmosphereColor = Color3.fromRGB(0, 200, 255),
+        atmosphereDecay = Color3.fromRGB(0, 100, 150),
+        bloomIntensity = 1.6,
+        ccTint = Color3.fromRGB(200, 255, 255),
+        ccSaturation = 0.5,
+        neonBoostMultiplier = 1.8,
+        particleColor = Color3.fromRGB(0, 255, 255),
+        orbParticleColor = Color3.fromRGB(255, 255, 0),
+        trailColor = Color3.fromRGB(255, 255, 0),
+        terrainWaterColor = Color3.fromRGB(0, 200, 255),
+    },
+    {
+        name = "Vaporwave",
+        ambient = Color3.fromRGB(60, 30, 80),
+        outdoorAmbient = Color3.fromRGB(90, 50, 120),
+        colorShiftTop = Color3.fromRGB(255, 150, 200),
+        colorShiftBottom = Color3.fromRGB(150, 255, 200),
+        atmosphereColor = Color3.fromRGB(255, 150, 220),
+        atmosphereDecay = Color3.fromRGB(150, 50, 120),
+        bloomIntensity = 1.2,
+        ccTint = Color3.fromRGB(255, 220, 255),
+        ccSaturation = 0.35,
+        neonBoostMultiplier = 1.4,
+        particleColor = Color3.fromRGB(255, 150, 200),
+        orbParticleColor = Color3.fromRGB(150, 255, 200),
+        trailColor = Color3.fromRGB(150, 255, 200),
+        terrainWaterColor = Color3.fromRGB(255, 150, 200),
+    },
+    {
+        name = "Toxic",
+        ambient = Color3.fromRGB(20, 40, 10),
+        outdoorAmbient = Color3.fromRGB(40, 80, 20),
+        colorShiftTop = Color3.fromRGB(0, 255, 0),
+        colorShiftBottom = Color3.fromRGB(255, 255, 0),
+        atmosphereColor = Color3.fromRGB(100, 255, 50),
+        atmosphereDecay = Color3.fromRGB(50, 150, 20),
+        bloomIntensity = 1.5,
+        ccTint = Color3.fromRGB(220, 255, 200),
+        ccSaturation = 0.55,
+        neonBoostMultiplier = 1.7,
+        particleColor = Color3.fromRGB(0, 255, 0),
+        orbParticleColor = Color3.fromRGB(255, 255, 0),
+        trailColor = Color3.fromRGB(255, 255, 0),
+        terrainWaterColor = Color3.fromRGB(100, 255, 50),
+    },
+    {
+        name = "Midnight",
+        ambient = Color3.fromRGB(5, 10, 20),
+        outdoorAmbient = Color3.fromRGB(10, 20, 40),
+        colorShiftTop = Color3.fromRGB(50, 100, 255),
+        colorShiftBottom = Color3.fromRGB(0, 50, 150),
+        atmosphereColor = Color3.fromRGB(30, 60, 150),
+        atmosphereDecay = Color3.fromRGB(10, 20, 60),
+        bloomIntensity = 0.8,
+        ccTint = Color3.fromRGB(180, 200, 255),
+        ccSaturation = 0.3,
+        neonBoostMultiplier = 1.3,
+        particleColor = Color3.fromRGB(50, 100, 255),
+        orbParticleColor = Color3.fromRGB(0, 50, 150),
+        trailColor = Color3.fromRGB(0, 50, 150),
+        terrainWaterColor = Color3.fromRGB(30, 60, 150),
+    },
+    {
+        name = "Inferno",
+        ambient = Color3.fromRGB(60, 10, 5),
+        outdoorAmbient = Color3.fromRGB(100, 20, 10),
+        colorShiftTop = Color3.fromRGB(255, 50, 0),
+        colorShiftBottom = Color3.fromRGB(255, 200, 0),
+        atmosphereColor = Color3.fromRGB(255, 80, 20),
+        atmosphereDecay = Color3.fromRGB(150, 30, 0),
+        bloomIntensity = 1.8,
+        ccTint = Color3.fromRGB(255, 200, 180),
+        ccSaturation = 0.6,
+        neonBoostMultiplier = 1.9,
+        particleColor = Color3.fromRGB(255, 50, 0),
+        orbParticleColor = Color3.fromRGB(255, 200, 0),
+        trailColor = Color3.fromRGB(255, 200, 0),
+        terrainWaterColor = Color3.fromRGB(255, 50, 0),
+    },
+    {
+        name = "Glacier",
+        ambient = Color3.fromRGB(10, 30, 60),
+        outdoorAmbient = Color3.fromRGB(20, 60, 100),
+        colorShiftTop = Color3.fromRGB(150, 255, 255),
+        colorShiftBottom = Color3.fromRGB(0, 150, 255),
+        atmosphereColor = Color3.fromRGB(100, 200, 255),
+        atmosphereDecay = Color3.fromRGB(50, 100, 150),
+        bloomIntensity = 1.1,
+        ccTint = Color3.fromRGB(220, 240, 255),
+        ccSaturation = 0.4,
+        neonBoostMultiplier = 1.5,
+        particleColor = Color3.fromRGB(150, 255, 255),
+        orbParticleColor = Color3.fromRGB(0, 150, 255),
+        trailColor = Color3.fromRGB(0, 150, 255),
+        terrainWaterColor = Color3.fromRGB(100, 200, 255),
+    },
+    {
+        name = "Void",
+        ambient = Color3.fromRGB(10, 5, 15),
+        outdoorAmbient = Color3.fromRGB(20, 10, 30),
+        colorShiftTop = Color3.fromRGB(150, 0, 255),
+        colorShiftBottom = Color3.fromRGB(50, 0, 100),
+        atmosphereColor = Color3.fromRGB(80, 0, 150),
+        atmosphereDecay = Color3.fromRGB(30, 0, 60),
+        bloomIntensity = 1.3,
+        ccTint = Color3.fromRGB(200, 180, 255),
+        ccSaturation = 0.35,
+        neonBoostMultiplier = 1.7,
+        particleColor = Color3.fromRGB(150, 0, 255),
+        orbParticleColor = Color3.fromRGB(50, 0, 100),
+        trailColor = Color3.fromRGB(50, 0, 100),
+        terrainWaterColor = Color3.fromRGB(80, 0, 150),
+    },
+    {
+        name = "Retro",
+        ambient = Color3.fromRGB(50, 50, 50),
+        outdoorAmbient = Color3.fromRGB(80, 80, 80),
+        colorShiftTop = Color3.fromRGB(255, 200, 100),
+        colorShiftBottom = Color3.fromRGB(200, 100, 50),
+        atmosphereColor = Color3.fromRGB(255, 200, 100),
+        atmosphereDecay = Color3.fromRGB(150, 100, 50),
+        bloomIntensity = 0.9,
+        ccTint = Color3.fromRGB(255, 240, 220),
+        ccSaturation = 0.25,
+        neonBoostMultiplier = 1.2,
+        particleColor = Color3.fromRGB(255, 200, 100),
+        orbParticleColor = Color3.fromRGB(200, 100, 50),
+        trailColor = Color3.fromRGB(200, 100, 50),
+        terrainWaterColor = Color3.fromRGB(255, 200, 100),
+    },
+    {
+        name = "Emerald",
+        ambient = Color3.fromRGB(5, 30, 15),
+        outdoorAmbient = Color3.fromRGB(10, 60, 30),
+        colorShiftTop = Color3.fromRGB(0, 255, 150),
+        colorShiftBottom = Color3.fromRGB(0, 100, 50),
+        atmosphereColor = Color3.fromRGB(0, 200, 100),
+        atmosphereDecay = Color3.fromRGB(0, 100, 50),
+        bloomIntensity = 1.5,
+        ccTint = Color3.fromRGB(200, 255, 230),
+        ccSaturation = 0.5,
+        neonBoostMultiplier = 1.6,
+        particleColor = Color3.fromRGB(0, 255, 150),
+        orbParticleColor = Color3.fromRGB(0, 100, 50),
+        trailColor = Color3.fromRGB(0, 100, 50),
+        terrainWaterColor = Color3.fromRGB(0, 200, 100),
+    }
+}
+
+-- ============================================================
+-- UTILITY
+-- ============================================================
+local function safeSet(instance, property, value)
+    pcall(function() instance[property] = value end)
+end
+
+local function storeOriginal(instance, property)
+    local key = instance
+    if not originals[key] then originals[key] = {} end
+    if originals[key][property] == nil then originals[key][property] = instance[property] end
+end
+
+local function createInstance(className, parent, properties)
+    local inst = Instance.new(className)
+    for k, v in pairs(properties or {}) do safeSet(inst, k, v) end
+    inst.Parent = parent
+    table.insert(createdInstances, inst)
+    return inst
+end
+
+local function trackConnection(conn)
+    table.insert(connections, conn)
+end
+
+-- ============================================================
+-- THEME APPLICATION
+-- ============================================================
+local function applyTheme(themeIndex)
+    local theme = THEMES[themeIndex]
+    if not theme then return end
+    currentTheme = themeIndex
+
+    for k, v in pairs(theme) do
+        if CONFIG[k] ~= nil and k ~= "name" then
+            CONFIG[k] = v
+        end
+    end
+
+    if not isEnabled then return end
+
+    for _, inst in ipairs(createdInstances) do
+        if inst:IsA("Atmosphere") then
+            safeSet(inst, "Color", theme.atmosphereColor)
+            safeSet(inst, "Decay", theme.atmosphereDecay)
+        elseif inst:IsA("BloomEffect") then
+            safeSet(inst, "Intensity", theme.bloomIntensity)
+        elseif inst:IsA("ColorCorrectionEffect") then
+            safeSet(inst, "TintColor", theme.ccTint)
+            safeSet(inst, "Saturation", theme.ccSaturation)
+        elseif inst:IsA("ParticleEmitter") then
+            safeSet(inst, "Color", ColorSequence.new(theme.particleColor))
+        end
+    end
+
+    safeSet(Lighting, "Ambient", theme.ambient)
+    safeSet(Lighting, "OutdoorAmbient", theme.outdoorAmbient)
+    safeSet(Lighting, "ColorShift_Top", theme.colorShiftTop)
+    safeSet(Lighting, "ColorShift_Bottom", theme.colorShiftBottom)
+
+    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+    if terrain then safeSet(terrain, "WaterColor", theme.terrainWaterColor) end
+
+    for _, inst in ipairs(createdInstances) do
+        if inst:IsA("Trail") then safeSet(inst, "Color", ColorSequence.new(theme.trailColor)) end
+    end
+end
+
+-- ============================================================
+-- LIGHTING & ATMOSPHERE
+-- ============================================================
+local function applyLighting()
+    storeOriginal(Lighting, "Ambient")
+    storeOriginal(Lighting, "OutdoorAmbient")
+    storeOriginal(Lighting, "ColorShift_Top")
+    storeOriginal(Lighting, "ColorShift_Bottom")
+    storeOriginal(Lighting, "Brightness")
+    storeOriginal(Lighting, "ExposureCompensation")
+    storeOriginal(Lighting, "GlobalShadows")
+    storeOriginal(Lighting, "Technology")
+    storeOriginal(Lighting, "ShadowSoftness")
+    storeOriginal(Lighting, "EnvironmentDiffuseScale")
+    storeOriginal(Lighting, "EnvironmentSpecularScale")
+
+    safeSet(Lighting, "Ambient", CONFIG.ambient)
+    safeSet(Lighting, "OutdoorAmbient", CONFIG.outdoorAmbient)
+    safeSet(Lighting, "ColorShift_Top", CONFIG.colorShiftTop)
+    safeSet(Lighting, "ColorShift_Bottom", CONFIG.colorShiftBottom)
+    safeSet(Lighting, "Brightness", CONFIG.brightness)
+    safeSet(Lighting, "ExposureCompensation", CONFIG.exposureCompensation)
+    safeSet(Lighting, "GlobalShadows", CONFIG.globalShadows)
+    safeSet(Lighting, "ShadowSoftness", CONFIG.shadowSoftness)
+    safeSet(Lighting, "EnvironmentDiffuseScale", CONFIG.environmentDiffuseScale)
+    safeSet(Lighting, "EnvironmentSpecularScale", CONFIG.environmentSpecularScale)
+    pcall(function() Lighting.Technology = CONFIG.technology end)
+
+    local atmos = createInstance("Atmosphere", Lighting, {
+        Density = CONFIG.atmosphereDensity,
+        Offset = CONFIG.atmosphereOffset,
+        Color = CONFIG.atmosphereColor,
+        Decay = CONFIG.atmosphereDecay,
+        Glare = CONFIG.atmosphereGlare,
+        Haze = CONFIG.atmosphereHaze,
+    })
+
+    local sky = createInstance("Sky", Lighting, {
+        StarCount = CONFIG.skyStarCount,
+        MoonAngularSize = CONFIG.skyMoonAngularSize,
+        SunAngularSize = CONFIG.skySunAngularSize,
+    })
+
+    return atmos, sky
+end
+
+-- ============================================================
+-- POST-PROCESSING
+-- ============================================================
+local function applyPostProcessing()
+    local bloom = createInstance("BloomEffect", Lighting, {
+        Intensity = CONFIG.bloomIntensity,
+        Size = CONFIG.bloomSize,
+        Threshold = CONFIG.bloomThreshold,
+    })
+
+    local cc = createInstance("ColorCorrectionEffect", Lighting, {
+        TintColor = CONFIG.ccTint,
+        Saturation = CONFIG.ccSaturation,
+        Contrast = CONFIG.ccContrast,
+        Brightness = CONFIG.ccBrightness,
+    })
+
+    local sunRays = createInstance("SunRaysEffect", Lighting, {
+        Intensity = CONFIG.sunRaysIntensity,
+        Spread = CONFIG.sunRaysSpread,
+    })
+
+    local dof = createInstance("DepthOfFieldEffect", Lighting, {
+        FarIntensity = CONFIG.dofFarIntensity,
+        FocusDistance = CONFIG.dofFocusDistance,
+        InFocusRadius = CONFIG.dofInFocusRadius,
+        NearIntensity = CONFIG.dofNearIntensity,
+    })
+
+    local blur = createInstance("BlurEffect", Lighting, {
+        Size = 0,
+    })
+
+    return bloom, cc, sunRays, dof, blur
+end
+
+-- ============================================================
+-- SCREEN GUI (VIGNETTE + CHROMATIC ABERRATION)
+-- ============================================================
+local function createScreenOverlay()
+    local gui = createInstance("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"), {
+        Name = "BladeBallShaderOverlay",
+        ResetOnSpawn = false,
+        IgnoreGuiInset = true,
+        DisplayOrder = 999,
+    })
+
+    local vignette = createInstance("Frame", gui, {
+        Name = "Vignette",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = CONFIG.vignetteTransparency,
+        BorderSizePixel = 0,
+        ZIndex = 10,
+    })
+
+    local vignetteGradient = createInstance("UIGradient", vignette, {
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(0.25, 0.15),
+            NumberSequenceKeypoint.new(0.75, 0.15),
+            NumberSequenceKeypoint.new(1, 1),
+        }),
+    })
+
+    local chroma = createInstance("Frame", gui, {
+        Name = "ChromaticAberration",
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Color3.fromRGB(255, 0, 255),
+        BackgroundTransparency = CONFIG.chromaTransparency,
+        BorderSizePixel = 0,
+        ZIndex = 5,
+    })
+
+    local chromaGradient = createInstance("UIGradient", chroma, {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+            ColorSequenceKeypoint.new(0.25, Color3.fromRGB(255, 0, 255)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 0)),
+            ColorSequenceKeypoint.new(0.75, Color3.fromRGB(0, 255, 255)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 255)),
+        }),
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.15),
+            NumberSequenceKeypoint.new(0.5, 0.85),
+            NumberSequenceKeypoint.new(1, 0.15),
+        }),
+    })
+
+    return gui, vignette, chroma
+end
+
+-- ============================================================
+-- PARTICLES & TRAILS
+-- ============================================================
+local function addParticlesToCharacter(character)
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local existing = 0
+    for _, child in ipairs(hrp:GetChildren()) do
+        if child:IsA("ParticleEmitter") and child.Name == "BladeBallShaderParticles" then existing = existing + 1 end
+    end
+    if existing >= CONFIG.maxParticlesPerCharacter then return end
+
+    createInstance("ParticleEmitter", hrp, {
+        Name = "BladeBallShaderParticles",
+        Texture = CONFIG.particleTexture,
+        Color = ColorSequence.new(CONFIG.particleColor),
+        Size = NumberSequence.new(CONFIG.particleSize),
+        Lifetime = NumberSequence.new(CONFIG.particleLifetime),
+        Rate = CONFIG.particleRate,
+        Speed = NumberRange.new(0.5, 1.5),
+        SpreadAngle = Vector2.new(180, 180),
+        LightEmission = 1,
+        LightInfluence = 0,
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(0.7, 0.5),
+            NumberSequenceKeypoint.new(1, 1),
+        }),
+    })
+end
+
+local function addOrbParticles(orb)
+    if not orb:IsA("BasePart") then return end
+    local existing = 0
+    for _, child in ipairs(orb:GetChildren()) do
+        if child:IsA("ParticleEmitter") and child.Name == "BladeBallOrbParticles" then existing = existing + 1 end
+    end
+    if existing > 0 then return end
+
+    createInstance("ParticleEmitter", orb, {
+        Name = "BladeBallOrbParticles",
+        Texture = CONFIG.particleTexture,
+        Color = ColorSequence.new(CONFIG.orbParticleColor),
+        Size = NumberSequence.new(CONFIG.orbParticleSize),
+        Lifetime = NumberSequence.new(0.8),
+        Rate = CONFIG.orbParticleRate,
+        Speed = NumberRange.new(1, 3),
+        SpreadAngle = Vector2.new(180, 180),
+        LightEmission = 1,
+        LightInfluence = 0,
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(0.6, 0.4),
+            NumberSequenceKeypoint.new(1, 1),
+        }),
+    })
+end
+
+local function setupCharacterParticles()
+    for _, player in ipairs(Players:GetPlayers()) do
+        local char = player.Character
+        if char then addParticlesToCharacter(char) end
+        trackConnection(player.CharacterAdded:Connect(function(newChar)
+            task.wait(0.1)
+            addParticlesToCharacter(newChar)
+        end))
+    end
+    trackConnection(Players.PlayerAdded:Connect(function(player)
+        trackConnection(player.CharacterAdded:Connect(function(newChar)
+            task.wait(0.1)
+            addParticlesToCharacter(newChar)
+        end))
+    end))
+end
+
+local function setupOrbParticles()
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        if desc:IsA("BasePart") and (desc.Name:lower():find("orb") or desc.Name:lower():find("ball")) then
+            if desc.Material == Enum.Material.Neon or desc:FindFirstChildOfClass("PointLight") then
+                addOrbParticles(desc)
+            end
+        end
+    end
+    trackConnection(Workspace.DescendantAdded:Connect(function(desc)
+        if desc:IsA("BasePart") and (desc.Name:lower():find("orb") or desc.Name:lower():find("ball")) then
+            task.wait(0.1)
+            if desc.Parent then addOrbParticles(desc) end
+        end
+    end))
+end
+
+local function setupTrailTracking()
+    local function createTrailPart()
+        local part = Instance.new("Part")
+        part.Size = Vector3.new(0.1, 0.1, 0.1)
+        part.Transparency = 1
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanQuery = false
+        part.CanTouch = false
+        part.Parent = Workspace
+        table.insert(createdInstances, part)
+
+        local a0 = Instance.new("Attachment"); a0.Parent = part
+        local a1 = Instance.new("Attachment"); a1.Parent = part
+
+        local tr = Instance.new("Trail")
+        tr.Attachment0 = a0
+        tr.Attachment1 = a1
+        tr.Color = ColorSequence.new(CONFIG.trailColor)
+        tr.Transparency = CONFIG.trailTransparency
+        tr.Lifetime = CONFIG.trailLifetime
+        tr.MinLength = 0.1
+        tr.MaxLength = 3
+        tr.LightEmission = 1
+        tr.LightInfluence = 0
+        tr.WidthScale = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) })
+        tr.Parent = part
+        table.insert(createdInstances, tr)
+        return part, tr
+    end
+
+    local function trackCharacter(character)
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local lastPos = hrp.Position
+
+        trackConnection(RunService.Heartbeat:Connect(function()
+            local currentPos = hrp.Position
+            if (currentPos - lastPos).Magnitude > 0.8 then
+                local part, tr = createTrailPart()
+                part.Position = currentPos
+                task.delay(CONFIG.trailLifetime + 0.1, function()
+                    if part then
+                        tr.Enabled = false
+                        task.delay(0.5, function() pcall(function() part:Destroy() end) end)
+                    end
+                end)
+            end
+            lastPos = currentPos
+        end))
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character then trackCharacter(player.Character) end
+        trackConnection(player.CharacterAdded:Connect(function(newChar)
+            task.wait(0.1)
+            trackCharacter(newChar)
+        end))
+    end
+end
+
+local function tuneMaterials()
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        if desc:IsA("BasePart") and desc.Material == Enum.Material.Neon then
+            local c = desc.Color
+            desc.Color = Color3.new(
+                math.min(c.R * CONFIG.neonBoostMultiplier, 1),
+                math.min(c.G * CONFIG.neonBoostMultiplier, 1),
+                math.min(c.B * CONFIG.neonBoostMultiplier, 1)
+            )
+        end
+    end
+
+    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+    if terrain then
+        safeSet(terrain, "WaterColor", CONFIG.terrainWaterColor)
+        safeSet(terrain, "WaterWaveSize", CONFIG.terrainWaterWaveSize)
+        safeSet(terrain, "WaterWaveSpeed", CONFIG.terrainWaterWaveSpeed)
+        safeSet(terrain, "WaterTransparency", CONFIG.terrainWaterTransparency)
+    end
+end
+
+local function setupParryBlur(blurEffect)
+    if not CONFIG.parryBlurEnabled then return end
+    local function triggerParryBlur()
+        if parryBlurActive then return end
+        parryBlurActive = true
+        safeSet(blurEffect, "Size", CONFIG.parryBlurSize)
+        task.delay(CONFIG.parryBlurDuration, function()
+            safeSet(blurEffect, "Size", 0)
+            parryBlurActive = false
+        end)
+    end
+
+    local remoteFolder = Workspace:FindFirstChild("Remotes") or Workspace:FindFirstChild("RemoteEvents")
+    if remoteFolder then
+        for _, remote in ipairs(remoteFolder:GetChildren()) do
+            if remote:IsA("RemoteEvent") then
+                local name = remote.Name:lower()
+                if name:find("parry") or name:find("hit") or name:find("block") or name:find("clash") then
+                    trackConnection(remote.OnClientEvent:Connect(triggerParryBlur))
+                end
+            end
+        end
+    end
+
+    if LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            trackConnection(humanoid.HealthChanged:Connect(function(newHealth)
+                if newHealth < humanoid.MaxHealth then triggerParryBlur() end
+            end))
+        end
+    end
+end
+
+local function startAnimationLoop(atmos, bloom, vignette, chroma)
+    local startTime = tick()
+    local hueTime = 0
+
+    trackConnection(RunService.RenderStepped:Connect(function(dt)
+        if not isEnabled then return end
+        local t = tick() - startTime
+        hueTime = hueTime + dt * CONFIG.hueRotationSpeed
+
+        if atmos then
+            local pulse = math.sin(t * CONFIG.atmospherePulseSpeed) * CONFIG.atmospherePulseAmount
+            safeSet(atmos, "Density", math.max(0, CONFIG.atmosphereDensity + pulse))
+        end
+
+        if bloom then
+            local bpulse = math.sin(t * CONFIG.bloomPulseSpeed) * CONFIG.bloomPulseAmount
+            safeSet(bloom, "Intensity", math.max(0, CONFIG.bloomIntensity + bpulse))
+        end
+
+        local hue = hueTime % 1
+        safeSet(Lighting, "ColorShift_Top", Color3.fromHSV(hue, 1, 1))
+        safeSet(Lighting, "ColorShift_Bottom", Color3.fromHSV((hue + 0.5) % 1, 1, 1))
+
+        if vignette then
+            local vpulse = math.sin(t * CONFIG.vignettePulseSpeed) * CONFIG.vignettePulseAmount
+            safeSet(vignette, "BackgroundTransparency", math.clamp(CONFIG.vignetteTransparency + vpulse, 0, 1))
+        end
+
+        if chroma then
+            local cpulse = math.sin(t * CONFIG.chromaPulseSpeed) * CONFIG.chromaPulseAmount
+            safeSet(chroma, "BackgroundTransparency", math.clamp(CONFIG.chromaTransparency + cpulse, 0, 1))
+        end
+
+        scanAccumulator = scanAccumulator + dt
+        if scanAccumulator >= CONFIG.descendantScanInterval then
+            scanAccumulator = 0
+            tuneMaterials()
+        end
+    end))
+end
+
+-- ============================================================
+-- CUSTOM DRAGGABLE UI
+-- ============================================================
+local function makeDraggable(frame, dragBar)
+    local dragging = false
+    local dragStart, startPos
+
+    dragBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+local function createUI()
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "BladeBallShaderUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.DisplayOrder = 1000
+    screenGui.Parent = playerGui
+    table.insert(createdInstances, screenGui)
+
+    -- Floating Toggle Button
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "ToggleUI"
+    toggleBtn.Size = UDim2.new(0, 45, 0, 45)
+    toggleBtn.Position = UDim2.new(0, 20, 0, 480) 
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 0, 200)
+    toggleBtn.Text = "⚡"
+    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleBtn.TextSize = 24
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.Parent = screenGui
+    table.insert(createdInstances, toggleBtn)
+
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(0, 10)
+    toggleCorner.Parent = toggleBtn
+    table.insert(createdInstances, toggleCorner)
+
+    -- Main Frame
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 320, 0, 450)
+    mainFrame.Position = UDim2.new(0, 20, 0, 20)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(20, 10, 30)
+    mainFrame.BackgroundTransparency = 0.15
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Active = true
+    mainFrame.Parent = screenGui
+    table.insert(createdInstances, mainFrame)
+
+    local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 10); corner.Parent = mainFrame
+    local stroke = Instance.new("UIStroke"); stroke.Color = Color3.fromRGB(255, 0, 200); stroke.Thickness = 2; stroke.Transparency = 0.3; stroke.Parent = mainFrame
+
+    -- Title Bar
+    local titleBar = Instance.new("Frame")
+    titleBar.Name = "TitleBar"
+    titleBar.Size = UDim2.new(1, 0, 0, 40)
+    titleBar.BackgroundColor3 = Color3.fromRGB(255, 0, 200)
+    titleBar.BackgroundTransparency = 0.7
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = mainFrame
+
+    local titleCorner = Instance.new("UICorner"); titleCorner.CornerRadius = UDim.new(0, 10); titleCorner.Parent = titleBar
+
+    local titleText = Instance.new("TextLabel")
+    titleText.Size = UDim2.new(1, -60, 1, 0)
+    titleText.Position = UDim2.new(0, 10, 0, 0)
+    titleText.BackgroundTransparency = 1
+    titleText.Text = "⚡ BLADE BALL SHADERS"
+    titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleText.TextSize = 16
+    titleText.Font = Enum.Font.GothamBold
+    titleText.TextXAlignment = Enum.TextXAlignment.Left
+    titleText.Parent = titleBar
+
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 30, 0, 30)
+    closeBtn.Position = UDim2.new(1, -35, 0, 5)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    closeBtn.BackgroundTransparency = 0.3
+    closeBtn.Text = "✕"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextSize = 18
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.BorderSizePixel = 0
+    closeBtn.Parent = titleBar
+
+    local closeCorner = Instance.new("UICorner"); closeCorner.CornerRadius = UDim.new(0, 6); closeCorner.Parent = closeBtn
+
+    -- Page Navigation Tabs
+    local tabBar = Instance.new("Frame")
+    tabBar.Size = UDim2.new(1, -10, 0, 30)
+    tabBar.Position = UDim2.new(0, 5, 0, 45)
+    tabBar.BackgroundTransparency = 1
+    tabBar.Parent = mainFrame
+
+    local tabLayout = Instance.new("UIListLayout")
+    tabLayout.FillDirection = Enum.FillDirection.Horizontal
+    tabLayout.Padding = UDim.new(0, 4)
+    tabLayout.Parent = tabBar
+
+    -- Container for pages
+    local pageContainer = Instance.new("Frame")
+    pageContainer.Size = UDim2.new(1, -10, 1, -85)
+    pageContainer.Position = UDim2.new(0, 5, 0, 80)
+    pageContainer.BackgroundTransparency = 1
+    pageContainer.Parent = mainFrame
+
+    -- Helper: Create a Page
+    local function createPage(name)
+        local page = Instance.new("ScrollingFrame")
+        page.Name = name
+        page.Size = UDim2.fromScale(1, 1)
+        page.BackgroundTransparency = 1
+        page.BorderSizePixel = 0
+        page.ScrollBarThickness = 4
+        page.ScrollBarImageColor3 = Color3.fromRGB(255, 0, 200)
+        page.CanvasSize = UDim2.new(0, 0, 0, 800)
+        page.Visible = false
+        page.Parent = pageContainer
+
+        local layout = Instance.new("UIListLayout")
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Padding = UDim.new(0, 6)
+        layout.Parent = page
+
+        local padding = Instance.new("UIPadding")
+        padding.PaddingTop = UDim.new(0, 5)
+        padding.PaddingLeft = UDim.new(0, 5)
+        padding.PaddingRight = UDim.new(0, 5)
+        padding.Parent = page
+
+        layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            page.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+        end)
+
+        return page
+    end
+
+    -- Create Pages
+    local mainPage = createPage("Main")
+    local configPage = createPage("Configs")
+    mainPage.Visible = true
+
+    -- Tab Buttons
+    local activeTabColor = Color3.fromRGB(255, 0, 200)
+    local inactiveTabColor = Color3.fromRGB(40, 20, 55)
+
+    local function createTabButton(text, page)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0.5, -2, 1, 0)
+        btn.BackgroundColor3 = inactiveTabColor
+        btn.Text = text
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.TextSize = 12
+        btn.Font = Enum.Font.GothamBold
+        btn.BorderSizePixel = 0
+        btn.Parent = tabBar
+
+        local btnCorner = Instance.new("UICorner"); btnCorner.CornerRadius = UDim.new(0, 4); btnCorner.Parent = btn
+
+        btn.MouseButton1Click:Connect(function()
+            for _, child in ipairs(pageContainer:GetChildren()) do
+                if child:IsA("ScrollingFrame") then child.Visible = false end
+            end
+            page.Visible = true
+            for _, t in ipairs(tabBar:GetChildren()) do
+                if t:IsA("TextButton") then t.BackgroundColor3 = inactiveTabColor end
+            end
+            btn.BackgroundColor3 = activeTabColor
+        end)
+        return btn
+    end
+
+    local mainTabBtn = createTabButton("Graphics", mainPage)
+    mainTabBtn.BackgroundColor3 = activeTabColor
+    createTabButton("Configs & Themes", configPage)
+
+    -- UI COMPONENT HELPERS
+    local function createToggle(parent, label, initialValue, callback)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, 0, 0, 32)
+        row.BackgroundColor3 = Color3.fromRGB(40, 20, 55)
+        row.BackgroundTransparency = 0.3
+        row.BorderSizePixel = 0
+        row.Parent = parent
+
+        local rowCorner = Instance.new("UICorner"); rowCorner.CornerRadius = UDim.new(0, 6); rowCorner.Parent = row
+
+        local labelText = Instance.new("TextLabel")
+        labelText.Size = UDim2.new(1, -60, 1, 0)
+        labelText.Position = UDim2.new(0, 10, 0, 0)
+        labelText.BackgroundTransparency = 1
+        labelText.Text = label
+        labelText.TextColor3 = Color3.fromRGB(220, 220, 220)
+        labelText.TextSize = 13
+        labelText.Font = Enum.Font.Gotham
+        labelText.TextXAlignment = Enum.TextXAlignment.Left
+        labelText.Parent = row
+
+        local toggle = Instance.new("TextButton")
+        toggle.Size = UDim2.new(0, 40, 0, 20)
+        toggle.Position = UDim2.new(1, -50, 0.5, -10)
+        toggle.BackgroundColor3 = initialValue and activeTabColor or Color3.fromRGB(80, 80, 80)
+        toggle.Text = initialValue and "ON" or "OFF"
+        toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+        toggle.TextSize = 11
+        toggle.Font = Enum.Font.GothamBold
+        toggle.BorderSizePixel = 0
+        toggle.Parent = row
+
+        local toggleCorner = Instance.new("UICorner"); toggleCorner.CornerRadius = UDim.new(0, 4); toggleCorner.Parent = toggle
+
+        local state = initialValue
+        toggle.MouseButton1Click:Connect(function()
+            state = not state
+            toggle.BackgroundColor3 = state and activeTabColor or Color3.fromRGB(80, 80, 80)
+            toggle.Text = state and "ON" or "OFF"
+            callback(state)
+        end)
+    end
+
+    local function createSlider(parent, label, min, max, initialValue, callback)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, 0, 0, 50)
+        row.BackgroundColor3 = Color3.fromRGB(40, 20, 55)
+        row.BackgroundTransparency = 0.3
+        row.BorderSizePixel = 0
+        row.Parent = parent
+
+        local rowCorner = Instance.new("UICorner"); rowCorner.CornerRadius = UDim.new(0, 6); rowCorner.Parent = row
+
+        local labelText = Instance.new("TextLabel")
+        labelText.Size = UDim2.new(1, -60, 0, 20)
+        labelText.Position = UDim2.new(0, 10, 0, 3)
+        labelText.BackgroundTransparency = 1
+        labelText.Text = label
+        labelText.TextColor3 = Color3.fromRGB(220, 220, 220)
+        labelText.TextSize = 12
+        labelText.Font = Enum.Font.Gotham
+        labelText.TextXAlignment = Enum.TextXAlignment.Left
+        labelText.Parent = row
+
+        local valueText = Instance.new("TextLabel")
+        valueText.Size = UDim2.new(0, 40, 0, 20)
+        valueText.Position = UDim2.new(1, -50, 0, 3)
+        valueText.BackgroundTransparency = 1
+        valueText.Text = string.format("%.2f", initialValue)
+        valueText.TextColor3 = activeTabColor
+        valueText.TextSize = 12
+        valueText.Font = Enum.Font.GothamBold
+        valueText.TextXAlignment = Enum.TextXAlignment.Right
+        valueText.Parent = row
+
+        local barBg = Instance.new("Frame")
+        barBg.Size = UDim2.new(1, -20, 0, 8)
+        barBg.Position = UDim2.new(0, 10, 0, 30)
+        barBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+        barBg.BorderSizePixel = 0
+        barBg.Parent = row
+
+        local barBgCorner = Instance.new("UICorner"); barBgCorner.CornerRadius = UDim.new(0, 4); barBgCorner.Parent = barBg
+
+        local barFill = Instance.new("Frame")
+        barFill.Size = UDim2.new((initialValue - min) / (max - min), 0, 1, 0)
+        barFill.BackgroundColor3 = activeTabColor
+        barFill.BorderSizePixel = 0
+        barFill.Parent = barBg
+
+        local barFillCorner = Instance.new("UICorner"); barFillCorner.CornerRadius = UDim.new(0, 4); barFillCorner.Parent = barFill
+
+        local currentValue = initialValue
+        barBg.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                local function update(inputObj)
+                    local mouseX = inputObj.Position.X
+                    local barAbs = barBg.AbsolutePosition.X
+                    local barSize = barBg.AbsoluteSize.X
+                    local percent = math.clamp((mouseX - barAbs) / barSize, 0, 1)
+                    currentValue = min + (max - min) * percent
+                    barFill.Size = UDim2.new(percent, 0, 1, 0)
+                    valueText.Text = string.format("%.2f", currentValue)
+                    callback(currentValue)
+                end
+                update(input)
+                local moveConn = UserInputService.InputChanged:Connect(function(inputObj)
+                    if inputObj.UserInputType == Enum.UserInputType.MouseMovement or inputObj.UserInputType == Enum.UserInputType.Touch then update(inputObj) end
+                end)
+                local endConn = UserInputService.InputEnded:Connect(function(inputObj)
+                    if inputObj.UserInputType == Enum.UserInputType.MouseButton1 or inputObj.UserInputType == Enum.UserInputType.Touch then
+                        moveConn:Disconnect(); endConn:Disconnect()
+                    end
+                end)
+            end
+        end)
+    end
+
+    -- PAGE 1: GRAPHICS
+    local lightingLabel = Instance.new("TextLabel"); lightingLabel.Size = UDim2.new(1, 0, 0, 24); lightingLabel.BackgroundTransparency = 1; lightingLabel.Text = "LIGHTING"; lightingLabel.TextColor3 = activeTabColor; lightingLabel.TextSize = 12; lightingLabel.Font = Enum.Font.GothamBold; lightingLabel.TextXAlignment = Enum.TextXAlignment.Left; lightingLabel.Parent = mainPage
+
+    createSlider(mainPage, "Brightness", 0, 5, CONFIG.brightness, function(value)
+        CONFIG.brightness = value; safeSet(Lighting, "Brightness", value)
+    end)
+    createSlider(mainPage, "Exposure", -2, 2, CONFIG.exposureCompensation, function(value)
+        CONFIG.exposureCompensation = value; safeSet(Lighting, "ExposureCompensation", value)
+    end)
+
+    local bloomLabel = Instance.new("TextLabel"); bloomLabel.Size = UDim2.new(1, 0, 0, 24); bloomLabel.BackgroundTransparency = 1; bloomLabel.Text = "BLOOM"; bloomLabel.TextColor3 = activeTabColor; bloomLabel.TextSize = 12; bloomLabel.Font = Enum.Font.GothamBold; bloomLabel.TextXAlignment = Enum.TextXAlignment.Left; bloomLabel.Parent = mainPage
+
+    createSlider(mainPage, "Bloom Intensity", 0, 3, CONFIG.bloomIntensity, function(value) CONFIG.bloomIntensity = value end)
+    createSlider(mainPage, "Bloom Size", 0, 56, CONFIG.bloomSize, function(value)
+        CONFIG.bloomSize = value
+        for _, inst in ipairs(createdInstances) do if inst:IsA("BloomEffect") then safeSet(inst, "Size", value) end end
+    end)
+
+    local ccLabel = Instance.new("TextLabel"); ccLabel.Size = UDim2.new(1, 0, 0, 24); ccLabel.BackgroundTransparency = 1; ccLabel.Text = "COLOR CORRECTION"; ccLabel.TextColor3 = activeTabColor; ccLabel.TextSize = 12; ccLabel.Font = Enum.Font.GothamBold; ccLabel.TextXAlignment = Enum.TextXAlignment.Left; ccLabel.Parent = mainPage
+
+    createSlider(mainPage, "Saturation", -1, 1, CONFIG.ccSaturation, function(value)
+        CONFIG.ccSaturation = value
+        for _, inst in ipairs(createdInstances) do if inst:IsA("ColorCorrectionEffect") then safeSet(inst, "Saturation", value) end end
+    end)
+    createSlider(mainPage, "Contrast", -1, 1, CONFIG.ccContrast, function(value)
+        CONFIG.ccContrast = value
+        for _, inst in ipairs(createdInstances) do if inst:IsA("ColorCorrectionEffect") then safeSet(inst, "Contrast", value) end end
+    end)
+
+    local fxLabel = Instance.new("TextLabel"); fxLabel.Size = UDim2.new(1, 0, 0, 24); fxLabel.BackgroundTransparency = 1; fxLabel.Text = "EFFECT TOGGLES"; fxLabel.TextColor3 = activeTabColor; fxLabel.TextSize = 12; fxLabel.Font = Enum.Font.GothamBold; fxLabel.TextXAlignment = Enum.TextXAlignment.Left; fxLabel.Parent = mainPage
+
+    createToggle(mainPage, "Atmosphere", true, function(state) for _, inst in ipairs(createdInstances) do if inst:IsA("Atmosphere") then inst.Enabled = state end end end)
+    createToggle(mainPage, "Bloom", true, function(state) for _, inst in ipairs(createdInstances) do if inst:IsA("BloomEffect") then inst.Enabled = state end end end)
+    createToggle(mainPage, "Color Correction", true, function(state) for _, inst in ipairs(createdInstances) do if inst:IsA("ColorCorrectionEffect") then inst.Enabled = state end end end)
+    createToggle(mainPage, "Sun Rays", true, function(state) for _, inst in ipairs(createdInstances) do if inst:IsA("SunRaysEffect") then inst.Enabled = state end end end)
+    createToggle(mainPage, "Depth of Field", true, function(state) for _, inst in ipairs(createdInstances) do if inst:IsA("DepthOfFieldEffect") then inst.Enabled = state end end end)
+
+    local screenFxLabel = Instance.new("TextLabel"); screenFxLabel.Size = UDim2.new(1, 0, 0, 24); screenFxLabel.BackgroundTransparency = 1; screenFxLabel.Text = "SCREEN EFFECTS"; screenFxLabel.TextColor3 = activeTabColor; screenFxLabel.TextSize = 12; screenFxLabel.Font = Enum.Font.GothamBold; screenFxLabel.TextXAlignment = Enum.TextXAlignment.Left; screenFxLabel.Parent = mainPage
+
+    createToggle(mainPage, "Vignette", true, function(state)
+        local gui = playerGui:FindFirstChild("BladeBallShaderOverlay")
+        if gui then local v = gui:FindFirstChild("Vignette"); if v then v.Visible = state end end
+    end)
+    createToggle(mainPage, "Chromatic Aberration", true, function(state)
+        local gui = playerGui:FindFirstChild("BladeBallShaderOverlay")
+        if gui then local c = gui:FindFirstChild("ChromaticAberration"); if c then c.Visible = state end end
+    end)
+
+    local worldFxLabel = Instance.new("TextLabel"); worldFxLabel.Size = UDim2.new(1, 0, 0, 24); worldFxLabel.BackgroundTransparency = 1; worldFxLabel.Text = "WORLD EFFECTS"; worldFxLabel.TextColor3 = activeTabColor; worldFxLabel.TextSize = 12; worldFxLabel.Font = Enum.Font.GothamBold; worldFxLabel.TextXAlignment = Enum.TextXAlignment.Left; worldFxLabel.Parent = mainPage
+
+    createToggle(mainPage, "Character Particles", true, function(state) for _, inst in ipairs(createdInstances) do if inst:IsA("ParticleEmitter") and inst.Name == "BladeBallShaderParticles" then inst.Enabled = state end end end)
+    createToggle(mainPage, "Orb Particles", true, function(state) for _, inst in ipairs(createdInstances) do if inst:IsA("ParticleEmitter") and inst.Name == "BladeBallOrbParticles" then inst.Enabled = state end end end)
+    createToggle(mainPage, "Motion Trails", true, function(state) for _, inst in ipairs(createdInstances) do if inst:IsA("Trail") then inst.Enabled = state end end end)
+    createToggle(mainPage, "Combat Parry Blur", true, function(state) CONFIG.parryBlurEnabled = state end)
+
+    local animLabel = Instance.new("TextLabel"); animLabel.Size = UDim2.new(1, 0, 0, 24); animLabel.BackgroundTransparency = 1; animLabel.Text = "ANIMATION"; animLabel.TextColor3 = activeTabColor; animLabel.TextSize = 12; animLabel.Font = Enum.Font.GothamBold; animLabel.TextXAlignment = Enum.TextXAlignment.Left; animLabel.Parent = mainPage
+
+    createSlider(mainPage, "Hue Cycle Speed", 0, 0.2, CONFIG.hueRotationSpeed, function(value) CONFIG.hueRotationSpeed = value end)
+    createSlider(mainPage, "Pulse Speed", 0, 2, CONFIG.atmospherePulseSpeed, function(value) CONFIG.atmospherePulseSpeed = value; CONFIG.bloomPulseSpeed = value end)
+
+    -- PAGE 2: CONFIGS & THEMES
+    local themeManagerLabel = Instance.new("TextLabel"); themeManagerLabel.Size = UDim2.new(1, 0, 0, 24); themeManagerLabel.BackgroundTransparency = 1; themeManagerLabel.Text = "THEME MANAGER (10 PREBUILTS)"; themeManagerLabel.TextColor3 = activeTabColor; themeManagerLabel.TextSize = 12; themeManagerLabel.Font = Enum.Font.GothamBold; themeManagerLabel.TextXAlignment = Enum.TextXAlignment.Left; themeManagerLabel.Parent = configPage
+
+    local themeGrid = Instance.new("Frame")
+    themeGrid.Size = UDim2.new(1, 0, 0, 200)
+    themeGrid.BackgroundTransparency = 1
+    themeGrid.Parent = configPage
+
+    local gridLayout = Instance.new("UIGridLayout")
+    gridLayout.CellSize = UDim2.new(0.5, -4, 0, 32)
+    gridLayout.CellPadding = UDim2.new(0, 4, 0, 4)
+    gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    gridLayout.Parent = themeGrid
+
+    local themeButtons = {}
+    for i, theme in ipairs(THEMES) do
+        local btn = Instance.new("TextButton")
+        btn.BackgroundColor3 = Color3.fromRGB(40, 20, 55)
+        btn.Text = theme.name
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.TextSize = 11
+        btn.Font = Enum.Font.GothamBold
+        btn.BorderSizePixel = 0
+        btn.LayoutOrder = i
+        btn.Parent = themeGrid
+
+        local btnCorner = Instance.new("UICorner"); btnCorner.CornerRadius = UDim.new(0, 4); btnCorner.Parent = btn
+        themeButtons[i] = btn
+
+        btn.MouseButton1Click:Connect(function()
+            applyTheme(i)
+            for _, b in ipairs(themeButtons) do b.BackgroundColor3 = Color3.fromRGB(40, 20, 55) end
+            btn.BackgroundColor3 = activeTabColor
+        end)
+
+        if i == currentTheme then btn.BackgroundColor3 = activeTabColor end
+    end
+
+    local configLabel = Instance.new("TextLabel"); configLabel.Size = UDim2.new(1, 0, 0, 24); configLabel.BackgroundTransparency = 1; configLabel.Text = "SAVE / LOAD CONFIGURATION"; configLabel.TextColor3 = activeTabColor; configLabel.TextSize = 12; configLabel.Font = Enum.Font.GothamBold; configLabel.TextXAlignment = Enum.TextXAlignment.Left; configLabel.Parent = configPage
+
+    -- FIXED: TextBox padding bug
+    local configBox = Instance.new("TextBox")
+    configBox.Size = UDim2.new(1, 0, 0, 80)
+    configBox.BackgroundColor3 = Color3.fromRGB(40, 20, 55)
+    configBox.Text = "-- Click 'Export' to save current settings\n-- Or paste config here and click 'Import'"
+    configBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    configBox.TextSize = 11
+    configBox.Font = Enum.Font.Code
+    configBox.TextWrapped = true
+    configBox.TextXAlignment = Enum.TextXAlignment.Left
+    configBox.TextYAlignment = Enum.TextYAlignment.Top
+    configBox.BorderSizePixel = 0
+    configBox.ClearTextOnFocus = false
+    configBox.MultiLine = true
+    configBox.Parent = configPage
+
+    local configBoxCorner = Instance.new("UICorner"); configBoxCorner.CornerRadius = UDim.new(0, 6); configBoxCorner.Parent = configBox
+    
+    -- The actual fix for the TextBox bug:
+    local configBoxPad = Instance.new("UIPadding")
+    configBoxPad.PaddingLeft = UDim.new(0, 5)
+    configBoxPad.PaddingTop = UDim.new(0, 5)
+    configBoxPad.Parent = configBox
+
+    local btnRow = Instance.new("Frame")
+    btnRow.Size = UDim2.new(1, 0, 0, 30)
+    btnRow.BackgroundTransparency = 1
+    btnRow.Parent = configPage
+
+    local btnRowLayout = Instance.new("UIListLayout")
+    btnRowLayout.FillDirection = Enum.FillDirection.Horizontal
+    btnRowLayout.Padding = UDim.new(0, 4)
+    btnRowLayout.Parent = btnRow
+
+    local exportBtn = Instance.new("TextButton")
+    exportBtn.Size = UDim2.new(0.5, -2, 1, 0)
+    exportBtn.BackgroundColor3 = Color3.fromRGB(40, 20, 55)
+    exportBtn.Text = "Export"
+    exportBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    exportBtn.TextSize = 12
+    exportBtn.Font = Enum.Font.GothamBold
+    exportBtn.BorderSizePixel = 0
+    exportBtn.Parent = btnRow
+    local exportCorner = Instance.new("UICorner"); exportCorner.CornerRadius = UDim.new(0, 4); exportCorner.Parent = exportBtn
+
+    local importBtn = Instance.new("TextButton")
+    importBtn.Size = UDim2.new(0.5, -2, 1, 0)
+    importBtn.BackgroundColor3 = Color3.fromRGB(40, 20, 55)
+    importBtn.Text = "Import"
+    importBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    importBtn.TextSize = 12
+    importBtn.Font = Enum.Font.GothamBold
+    importBtn.BorderSizePixel = 0
+    importBtn.Parent = btnRow
+    local importCorner = Instance.new("UICorner"); importCorner.CornerRadius = UDim.new(0, 4); importCorner.Parent = importBtn
+
+    exportBtn.MouseButton1Click:Connect(function()
+        local str = "{\n"
+        for k, v in pairs(CONFIG) do
+            if type(v) == "number" then str = str .. string.format("    %s = %s,\n", k, v)
+            elseif type(v) == "boolean" then str = str .. string.format("    %s = %s,\n", k, tostring(v))
+            end
+        end
+        str = str .. "}"
+        configBox.Text = str
+    end)
+
+    importBtn.MouseButton1Click:Connect(function()
+        local success = pcall(function()
+            local loaded = game:GetService("HttpService"):JSONDecode(configBox.Text)
+            if loaded then
+                for k, v in pairs(loaded) do
+                    if CONFIG[k] ~= nil and type(CONFIG[k]) == type(v) then
+                        CONFIG[k] = v
+                    end
+                end
+                _G.BladeBallShaders.disable()
+                task.wait(0.1)
+                _G.BladeBallShaders.enable()
+            end
+        end)
+    end)
+
+    -- ACTIONS
+    local actionLabel = Instance.new("TextLabel"); actionLabel.Size = UDim2.new(1, 0, 0, 24); actionLabel.BackgroundTransparency = 1; actionLabel.Text = "DANGER ZONE"; actionLabel.TextColor3 = Color3.fromRGB(255, 50, 50); actionLabel.TextSize = 12; actionLabel.Font = Enum.Font.GothamBold; actionLabel.TextXAlignment = Enum.TextXAlignment.Left; actionLabel.Parent = configPage
+
+    local resetBtn = Instance.new("TextButton")
+    resetBtn.Size = UDim2.new(1, 0, 0, 32)
+    resetBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    resetBtn.BackgroundTransparency = 0.5
+    resetBtn.Text = "Reset All Shaders"
+    resetBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    resetBtn.TextSize = 13
+    resetBtn.Font = Enum.Font.GothamBold
+    resetBtn.BorderSizePixel = 0
+    resetBtn.Parent = configPage
+    local resetCorner = Instance.new("UICorner"); resetCorner.CornerRadius = UDim.new(0, 6); resetCorner.Parent = resetBtn
+
+    resetBtn.MouseButton1Click:Connect(function()
+        _G.BladeBallShaders.disable()
+        task.wait(0.1)
+        _G.BladeBallShaders.enable()
+    end)
+
+    -- UI Toggles & Draggability
+    local uiVisible = true
+    local function toggleUI()
+        uiVisible = not uiVisible
+        mainFrame.Visible = uiVisible
+        toggleBtn.Visible = uiVisible
+    end
+
+    toggleBtn.MouseButton1Click:Connect(toggleUI)
+    closeBtn.MouseButton1Click:Connect(toggleUI)
+
+    -- Master Toggle with RightShift
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.RightShift then
+            toggleUI()
+        end
+    end)
+
+    makeDraggable(mainFrame, titleBar)
+
+    return screenGui, mainFrame
+end
+
+-- ============================================================
+-- ENABLE / DISABLE
+-- ============================================================
+local uiRef = nil
+
+local function enable()
+    if isEnabled then return end
+    isEnabled = true
+
+    local atmos, sky = applyLighting()
+    local bloom, cc, sunRays, dof, blur = applyPostProcessing()
+    local gui, vignette, chroma = createScreenOverlay()
+
+    setupCharacterParticles()
+    setupOrbParticles()
+    setupTrailTracking()
+    tuneMaterials()
+    setupParryBlur(blur)
+    startAnimationLoop(atmos, bloom, vignette, chroma)
+
+    if not uiRef then
+        uiRef = createUI()
+    else
+        uiRef.Visible = true
+    end
+end
+
+local function disable()
+    if not isEnabled then return end
+    isEnabled = false
+
+    for _, conn in ipairs(connections) do pcall(function() conn:Disconnect() end) end
+    connections = {}
+
+    for instance, props in pairs(originals) do
+        for prop, value in pairs(props) do safeSet(instance, prop, value) end
+    end
+    originals = {}
+
+    for _, inst in ipairs(createdInstances) do pcall(function() inst:Destroy() end) end
+    createdInstances = {}
+
+    if uiRef then uiRef.Visible = false end
+end
+
+-- ============================================================
+-- PUBLIC API
+-- ============================================================
+_G.BladeBallShaders = {
+    enable = enable,
+    disable = disable,
+    config = CONFIG,
+    themes = THEMES,
+    setTheme = function(index) applyTheme(index) end,
+}
+
+-- Auto-enable
+enable()
